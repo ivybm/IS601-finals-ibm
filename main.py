@@ -3,9 +3,10 @@ from fastapi import FastAPI, HTTPException, Depends
 from pydantic import BaseModel
 import re
 import sqlite3
-
-
 import uvicorn
+
+MAXIMUM_NAME_LENGTH = 64
+REQUIRED_PHONE_LENGTH = 10
 
 if __name__ == "__main__":
     uvicorn.run("main:app", host="127.0.0.1", port=8080)
@@ -22,6 +23,19 @@ class CustomerCreate(BaseModel):
 class CustomerUpdate(BaseModel):
     name: Optional[str] = None
     phone: Optional[str] = None 
+
+class Item(BaseModel):
+    id: int
+    name: str
+    price: float
+
+class ItemCreate(BaseModel):
+    name: str
+    price: float
+
+class ItemUpdate(BaseModel):
+    name: Optional[str] = None
+    price: Optional[float] = 0.00
 
 app = FastAPI()
 
@@ -55,6 +69,17 @@ def format_phone_number(phone_number):
         formatted_number = f"{digits[:3]}-{digits[3:6]}-{digits[6:]}"
         return formatted_number
 
+def validate_customer_name_length(name):
+    if (len(name) > MAXIMUM_NAME_LENGTH):
+        return False
+    return True
+
+def validate_customer_phone_length(phone):
+    phone_length = len(phone)
+    if (phone_length < REQUIRED_PHONE_LENGTH or phone_length > REQUIRED_PHONE_LENGTH):
+        return False
+    return True
+
 @app.get("/")
 def read_root():
     return {"Hello": "World"}
@@ -63,7 +88,15 @@ def read_root():
 async def create_customer(customerCreate: CustomerCreate, db: sqlite3.Connection = Depends(get_db)):
     """Creates a customer in the DB given a JSON representation"""
     name = customerCreate.name
-    phone = format_phone_number(customerCreate.phone)
+    phone = customerCreate.phone
+
+    if (not validate_customer_name_length(name)):
+        raise HTTPException(status_code=400, detail=f"Customer Name is beyond the maximum allowed length of {MAXIMUM_NAME_LENGTH}.")
+    
+    if (not validate_customer_phone_length(phone)):
+        raise HTTPException(status_code=400, detail=f"Customer Phone is not of required length {REQUIRED_PHONE_LENGTH}.")
+    phone = format_phone_number(phone)
+
     cursor = db.cursor()
 
     # Insert a new row
@@ -114,8 +147,14 @@ def update_customer(id: str, customerUpdate: CustomerUpdate, db: sqlite3.Connect
     old_phone = customer.phone
 
     new_name = customerUpdate.name
+    if (new_name is not None):
+        if (not validate_customer_name_length(new_name)):
+            raise HTTPException(status_code=400, detail=f"Customer new name is beyond the maximum allowed length of {MAXIMUM_NAME_LENGTH}.")
+    
     new_phone = customerUpdate.phone
     if (new_phone is not None):
+        if (not validate_customer_phone_length(new_phone)):
+            raise HTTPException(status_code=400, detail=f"Customer Phone is not of required length {REQUIRED_PHONE_LENGTH}.")
         new_phone = format_phone_number(new_phone)
 
     cursor = db.cursor()
