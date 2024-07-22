@@ -60,6 +60,20 @@ def get_customer_service(id: str, db: sqlite3.Connection = Depends(get_db)):
         customer = CustomerCreate(name=data[0], phone=data[1])
         return customer
     
+def get_item_service(id: str, db: sqlite3.Connection = Depends(get_db)):
+    """Retrieves a JSON representation of a customer in the DB"""
+    cursor = db.cursor()
+
+    # Retrieve the customer
+    cursor.execute("SELECT name, price FROM items where id = ?", (id,))
+    data = cursor.fetchone()
+    cursor.close()
+    if data is None:
+        return data
+    else:
+        item = ItemCreate(name=data[0], price=data[1])
+        return item
+    
 def format_phone_number(phone_number):
         """Formats the input phone number string to a standard 'xxx-xxx-xxxx' format."""
         # Remove all non-numeric characters
@@ -79,6 +93,9 @@ def validate_customer_phone_length(phone):
     if (phone_length < REQUIRED_PHONE_LENGTH or phone_length > REQUIRED_PHONE_LENGTH):
         return False
     return True
+
+def format_price(price):
+    return round(price, 2)
 
 @app.get("/")
 def read_root():
@@ -185,5 +202,97 @@ def update_customer(id: str, customerUpdate: CustomerUpdate, db: sqlite3.Connect
 
     return result_detail
 
+@app.post("/items")
+async def create_item(itemCreate: ItemCreate, db: sqlite3.Connection = Depends(get_db)):
+    """Creates an item in the DB given a JSON representation"""
+    name = itemCreate.name
+    price = format_price(itemCreate.price)
 
+    if (not validate_customer_name_length(name)):
+        raise HTTPException(status_code=400, detail=f"Item name is beyond the maximum allowed length of {MAXIMUM_NAME_LENGTH}.")
 
+    cursor = db.cursor()
+
+    # Insert a new row
+    cursor.execute("INSERT INTO items(name, price) VALUES (?, ?);", (name, price))
+    
+    # Commit the transaction
+    db.commit()
+
+    last_id = cursor.lastrowid
+    item = Item(id=last_id, name=name, price=price)
+
+    cursor.close()
+    return item
+
+@app.get("/items/{id}")
+def get_item(id: str, db: sqlite3.Connection = Depends(get_db)):
+    """Retrieves a JSON representation of an item in the DB"""
+    item = get_item_service(id, db)
+    if item is None:
+        raise HTTPException(status_code=404, detail="Item not found")
+    else:
+        return item
+    
+@app.delete("/items/{id}")
+def delete_item(id: str, db: sqlite3.Connection = Depends(get_db)):
+    """Deletes an item in the DB"""
+    item = get_item_service(id, db)
+    if item is None:
+        raise HTTPException(status_code=404, detail="Item not found")
+    
+    cursor = db.cursor()
+    cursor.execute("DELETE FROM items WHERE id = ?", (id,))
+    db.commit()
+    if cursor.rowcount == 0:
+        cursor.close()
+        raise HTTPException(status_code=404, detail="Item not found")
+    cursor.close()
+    return f"Successfully deleted item id {id} with name {item.name} and price {item.price}."
+
+@app.put("/items/{id}")
+def update_item(id: str, itemUpdate: ItemUpdate, db: sqlite3.Connection = Depends(get_db)):
+    """Updates an item in the DB given a JSON representation"""
+    item = get_item_service(id, db)
+    if item is None:
+        raise HTTPException(status_code=404, detail="Item not found")
+    
+    old_name = item.name
+    old_price = item.price
+
+    new_name = itemUpdate.name
+    if (new_name is not None):
+        if (not validate_customer_name_length(new_name)):
+            raise HTTPException(status_code=400, detail=f"Item new name is beyond the maximum allowed length of {MAXIMUM_NAME_LENGTH}.")
+    
+    new_price = itemUpdate.price
+    if (new_price is not None):
+        new_price = format_price(new_price)
+
+    cursor = db.cursor()
+    if (new_name is not None and new_name != "" and new_price == 0.00):
+        cursor.execute(
+            "UPDATE items SET name = ? WHERE id = ?",
+            (new_name, id)
+        )
+        result_detail = f"Successfully updated item id {id} with old name {old_name} to new name {new_name}." 
+    elif (new_price != 0.00 and new_name is None):
+        cursor.execute(
+            "UPDATE items SET price = ? WHERE id = ?",
+            (new_price, id)
+        )
+        result_detail = f"Successfully updated item id {id} with old price {old_price} to new price {new_price}." 
+    else:
+        cursor.execute(
+            "UPDATE items SET name = ?, price = ? WHERE id = ?",
+            (new_name, new_price, id)
+        )
+        result_detail = f"Successfully updated item id {id} with old name {old_name} and price {old_price} to new name {new_name} and price {new_price}." 
+
+    db.commit()
+    if cursor.rowcount == 0:
+        cursor.close()
+        raise HTTPException(status_code=404, detail="Item not found")
+    cursor.close()
+
+    return result_detail
