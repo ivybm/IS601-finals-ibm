@@ -1,4 +1,5 @@
 import sqlite3
+import json
 
 connection = sqlite3.connect("db.sqlite")
 cursor = connection.cursor()
@@ -32,3 +33,27 @@ CREATE TABLE IF NOT EXISTS item_list(
     FOREIGN KEY(item_id) REFERENCES items(id)
 );
 """)
+
+with open('customers.json') as f:
+    customers = json.load(f)
+    # print(customers)
+for phone, name in customers.items():
+    cursor.execute("INSERT INTO customers (name, phone) VALUES (?, ?);", (name, phone))
+
+result_customers = cursor.execute("SELECT * FROM customers;")
+for customer in result_customers.fetchall():
+    print(customer)
+
+with open('items.json') as f:
+    items = json.load(f)
+    # print(item)
+for name, stats in items.items():
+    price = stats["price"]
+    number_of_orders = stats["orders"] # not used
+    cursor.execute("INSERT INTO items (name, price) VALUES (?, ?);", (name, price))
+
+result_items = cursor.execute("SELECT * FROM items;")
+for item in result_items.fetchall():
+    print(item)
+
+connection.commit()
