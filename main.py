@@ -13,10 +13,6 @@ connection = sqlite3.connect("db.sqlite", check_same_thread=False)
 cursor = connection.cursor()
 
 
-# if __name__ == "__main__":
-#     uvicorn.run("main:app", host="127.0.0.1", port=8080)
-
-
 class Customer(BaseModel):
     id: int
     name: str
@@ -134,7 +130,7 @@ def get_item_service(id: str):
 
 
 def get_item_given_name(item_name: str):
-    """Given a name, retrieves an item id and its price from the DB"""
+    """Given a name, retrieves an item from the DB"""
     # Retrieve the customer
     cursor.execute("SELECT id, price FROM items where name = ?", (item_name,))
     data = cursor.fetchone()
@@ -155,12 +151,14 @@ def format_phone_number(phone_number):
 
 
 def validate_customer_name_length(name):
+    """Validates the length of the customer name"""
     if len(name) > MAXIMUM_NAME_LENGTH:
         return False
     return True
 
 
 def validate_customer_phone_length(phone):
+    """Validates the length of the customer phone number"""
     phone_length = len(phone)
     if phone_length < REQUIRED_PHONE_LENGTH or phone_length > REQUIRED_PHONE_LENGTH:
         return False
@@ -168,6 +166,7 @@ def validate_customer_phone_length(phone):
 
 
 def format_price(price):
+    """Formats the price by rounding it off to 2-decimal places"""
     return round(price, 2)
 
 
@@ -200,7 +199,7 @@ def create_customer_service(customer_create: CustomerCreate):
 
 
 def get_order_items(id: int):
-    # Get item list by order_id
+    """Retrieves items for an order"""
     cursor.execute("SELECT * from item_list where order_id = ?", (id,))
     item_list_data = cursor.fetchall()
 
@@ -213,7 +212,7 @@ def get_order_items(id: int):
 
 
 def get_order_service(id: int):
-    """retrieves a JSON representation of an order in the DB"""
+    """Retrieves a JSON representation of an order in the DB"""
     # Get order by id
     cursor.execute("SELECT * from orders where id = ?", (id,))
     order_data = cursor.fetchone()
@@ -266,6 +265,7 @@ def get_order_service(id: int):
 
 
 def create_order_items(order_id, items: list[ItemQuantity]):
+    """Creates items for an order in the DB"""
     items_list = []
     total = 0
 
@@ -302,6 +302,7 @@ def create_order_items(order_id, items: list[ItemQuantity]):
 
 
 def delete_order_items(id: int):
+    """Deletes items from an order in the DB"""
     cursor.execute("DELETE FROM item_list WHERE order_id = ?", (id,))
     connection.commit()
     if cursor.rowcount == 0:
@@ -518,6 +519,7 @@ async def create_order(order_create: OrderCreate):
 
 @app.get("/orders/{id}")
 async def get_order(id: int):
+    """Retrieves a JSON representation of an order in the DB"""
     return get_order_service(id)
 
 
