@@ -4,6 +4,18 @@ import json
 connection = sqlite3.connect("db.sqlite")
 cursor = connection.cursor()
 cursor.execute("""
+DROP TABLE IF EXISTS item_list;
+""")
+cursor.execute("""
+DROP TABLE IF EXISTS orders;
+""")
+cursor.execute("""
+DROP TABLE IF EXISTS items;
+""")
+cursor.execute("""
+DROP TABLE IF EXISTS customers;
+""")
+cursor.execute("""
 CREATE TABLE IF NOT EXISTS customers(
     id INTEGER PRIMARY KEY,
     name CHAR(64) NOT NULL,
@@ -57,3 +69,4 @@ for item in result_items.fetchall():
     print(item)
 
 connection.commit()
+connection.close()
