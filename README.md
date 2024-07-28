@@ -11,7 +11,7 @@ This repo contains a REST API backend for a dosa restaurant. This uses a SQLite 
 - items
 - orders
 
-The API supports CRUD (create, read, update, delete) for the three objects. The script named `init_db.py` will initialize an empty database using relational constraints (primary keys and foreign keys) from the `example_orders.json` file we used in the midterm project. The SQLite database is in a file named `db.sqlite`. The FastAPI backend reads and writes from `db.sqlite` and is called `main.py`.
+The API supports CRUD (create, read, update, delete) for the three objects. The script named `init_db.py` will initialize an empty database using relational constraints (primary keys and foreign keys) from the `customers.json` and `items.json` file we used in the midterm project. The SQLite database is in a file named `db.sqlite`. The FastAPI backend reads and writes from `db.sqlite` and is called `main.py`.
 
 ThHE API supports the following endpoints:
 
