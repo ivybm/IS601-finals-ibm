@@ -2,6 +2,7 @@ from typing import Optional
 from datetime import datetime
 from fastapi import FastAPI, HTTPException, Depends
 from pydantic import BaseModel, validator
+from fastapi.responses import JSONResponse
 
 import re
 import sqlite3
@@ -100,7 +101,7 @@ class OrderReturned(BaseModel):
 
 
 class OrderUpdate(BaseModel):
-    items: Optional[list[ItemQuantity]] = []
+    items: Optional[list[ItemQuantity]] = None
     notes: Optional[str] = None
 
 
@@ -113,7 +114,7 @@ def get_customer_service(id: str):
     cursor.execute("SELECT name, phone FROM customers where id = ?", (id,))
     data = cursor.fetchone()
     if data is None:
-        raise HTTPException(status_code=404, detail=f"Customer {id} not found.")
+        raise HTTPException(status_code=404, detail=f"Customer ID {id} not found.")
     else:
         return CustomerCreate(name=data[0], phone=data[1])
 
@@ -124,7 +125,7 @@ def get_item_service(id: str):
     cursor.execute("SELECT name, price FROM items where id = ?", (id,))
     data = cursor.fetchone()
     if data is None:
-        raise HTTPException(status_code=404, detail=f"Item {id} not found.")
+        raise HTTPException(status_code=404, detail=f"Item ID {id} not found.")
     else:
         return ItemCreate(name=data[0], price=data[1])
 
@@ -274,6 +275,10 @@ def create_order_items(order_id, items: list[ItemQuantity]):
         item = get_item_given_name(item_name)
         item_price = item.price
         item_quantity = item_ordered.quantity
+        if item_quantity == 0:
+            raise HTTPException(
+                status_code=400, detail=f"Item quantity for {item_name} is 0."
+            )
         item_price_total = item_price * item_quantity
         total += item_price_total
 
@@ -344,7 +349,7 @@ async def delete_customer(id: int):
         raise HTTPException(
             status_code=500, detail=f"Failed to delete Customer ID {id}."
         )
-    return f"Successfully deleted customer id {id} with name {customer.name} and phone {customer.phone}."
+    return f"Successfully deleted Customer ID {id} with name {customer.name} and phone {customer.phone}."
 
 
 @app.put("/customers/{id}")
@@ -391,7 +396,7 @@ async def update_customer(id: int, customer_update: CustomerUpdate):
     if cursor.rowcount == 0:
         cursor.close()
         raise HTTPException(
-            status_code=500, detail=f"Update of Customer ID {id} failed."
+            status_code=500, detail=f"Failed to update Customer ID {id}."
         )
     return result_detail
 
@@ -433,7 +438,7 @@ async def delete_item(id: int):
     connection.commit()
     if cursor.rowcount == 0:
         raise HTTPException(status_code=500, detail=f"Failed to delete Item ID {id}.")
-    return f"Successfully deleted item id {id} with name {item.name} and price {item.price}."
+    return f"Successfully deleted Item ID {id} with name {item.name} and price {item.price}."
 
 
 @app.put("/items/{id}")
@@ -457,16 +462,16 @@ async def update_item(id: int, item_update: ItemUpdate):
 
     if new_name is not None and new_name != "" and new_price == 0.00:
         cursor.execute("UPDATE items SET name = ? WHERE id = ?", (new_name, id))
-        result_detail = f"Successfully updated item id {id} with old name {old_name} to new name {new_name}."
+        result_detail = f"Successfully updated Item ID {id} with old name {old_name} to new name {new_name}."
     elif new_price != 0.00 and new_name is None:
         cursor.execute("UPDATE items SET price = ? WHERE id = ?", (new_price, id))
-        result_detail = f"Successfully updated item id {id} with old price {old_price} to new price {new_price}."
+        result_detail = f"Successfully updated Item ID {id} with old price {old_price} to new price {new_price}."
     else:
         cursor.execute(
             "UPDATE items SET name = ?, price = ? WHERE id = ?",
             (new_name, new_price, id),
         )
-        result_detail = f"Successfully updated item id {id} with old name {old_name} and price {old_price} to new name {new_name} and price {new_price}."
+        result_detail = f"Successfully updated Item ID {id} with old name {old_name} and price {old_price} to new name {new_name} and price {new_price}."
 
     connection.commit()
     if cursor.rowcount == 0:
@@ -542,10 +547,13 @@ async def update_order(id: int, order_update: OrderUpdate):
     notes = order_update.notes
     items = order_update.items
 
-    if (notes is None or len(notes == 0)) and (items is None or len(items) == 0):
-        raise HTTPException(
-            status_code=500, detail=f"Nothing to update for Order ID {id}."
+    if (notes is None or not notes) and (items is None or len(items) == 0):
+        return JSONResponse(
+            status_code=200, detail=f"Nothing to update for Order ID {id}."
         )
+
+    # Check if order exists
+    get_order_service(id)
 
     current_timestamp = datetime.now()
 
