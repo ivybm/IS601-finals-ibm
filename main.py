@@ -173,7 +173,7 @@ async def create_customer(customer_create: CustomerCreate):
     return create_customer_service(customer_create)
 
 @app.get("/customers/{id}")
-async def get_customer(id: str):
+async def get_customer(id: int):
     """Retrieves a JSON representation of a customer in the DB"""
     customer = get_customer_service(id)
     if customer is None:
@@ -182,7 +182,7 @@ async def get_customer(id: str):
         return customer
     
 @app.delete("/customers/{id}")
-async def delete_customer(id: str):
+async def delete_customer(id: int):
     """Deletes a customer in the DB"""
     customer = get_customer_service(id)
     if customer is None:
@@ -197,7 +197,7 @@ async def delete_customer(id: str):
     return f"Successfully deleted customer id {id} with name {customer.name} and phone {customer.phone}."
 
 @app.put("/customers/{id}")
-async def update_customer(id: str, customer_update: CustomerUpdate):
+async def update_customer(id: int, customer_update: CustomerUpdate):
     """Updates a customer in the DB given a JSON representation"""
     customer = get_customer_service(id)
     if customer is None:
@@ -261,7 +261,7 @@ async def create_item(item_create: ItemCreate):
     return Item(id=last_id, name=name, price=price)
 
 @app.get("/items/{id}")
-async def get_item(id: str):
+async def get_item(id: int):
     """Retrieves a JSON representation of an item in the DB"""
     item = get_item_service(id)
     if item is None:
@@ -270,7 +270,7 @@ async def get_item(id: str):
         return item
     
 @app.delete("/items/{id}")
-def delete_item(id: str):
+async def delete_item(id: int):
     """Deletes an item in the DB"""
     item = get_item_service(id)
     if item is None:
@@ -283,7 +283,7 @@ def delete_item(id: str):
     return f"Successfully deleted item id {id} with name {item.name} and price {item.price}."
 
 @app.put("/items/{id}")
-def update_item(id: str, item_update: ItemUpdate):
+async def update_item(id: int, item_update: ItemUpdate):
     """Updates an item in the DB given a JSON representation"""
     item = get_item_service(id)
     if item is None:
@@ -419,3 +419,18 @@ async def get_order(id: int):
         if len(items_map) > 0:
             total=sum(item.item_price_total for item in items_map.values())
     return OrderReturned(id=id, timestamp=timestamp, name=customer.name, phone=customer.phone, notes=notes, items=list(items_map.values()), total=total)
+
+@app.delete("/orders/{id}")
+async def delete_order(id: int):
+    """Deletes an order in the DB"""    
+    cursor.execute("DELETE FROM item_list WHERE order_id = ?", (id,))
+    connection.commit()
+    if cursor.rowcount == 0:
+        raise HTTPException(status_code=404, detail=f"Order id {id} not found in item_list table.")
+    
+    cursor.execute("DELETE FROM orders WHERE id = ?", (id,))
+    connection.commit()
+    if cursor.rowcount == 0:
+        raise HTTPException(status_code=404, detail=f"Order id {id} not found.")
+    
+    return f"Successfully deleted Order ID {id}."
