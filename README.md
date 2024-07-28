@@ -1,7 +1,7 @@
 # IS601-finals-ibm
 Final Project for IS601
 
-## Contact the Author
+# Contact the Author
 Ivy Blossom B. Manalang
 ibm@njit.edu
 
