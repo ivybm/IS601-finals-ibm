@@ -1,7 +1,7 @@
 from typing import Optional
 from datetime import datetime
 from fastapi import FastAPI, HTTPException, Depends
-from pydantic import BaseModel
+from pydantic import BaseModel, validator
 
 import re
 import sqlite3
@@ -34,6 +34,10 @@ class Item(BaseModel):
     name: str
     price: float
 
+    @validator('price', pre=True, always=True)
+    def format_price(cls, v):
+        return round(v, 2)
+
 class ItemCreate(BaseModel):
     name: str
     price: float
@@ -60,6 +64,9 @@ class ItemQuantityTotalPrice(BaseModel):
     class Config:
         alias_generator = to_camel_case
         allow_population_by_field_name = True
+        json_encoders = {
+            float: lambda v: format(v, '.2f')
+        }
 
 class OrderCreate(BaseModel):
     name: str
@@ -82,6 +89,15 @@ class OrderReturned(BaseModel):
     items: list[ItemQuantityTotalPrice]
     total: float
 
+    class Config:
+        json_encoders = {
+            float: lambda v: format(v, '.2f')
+        }
+
+class OrderUpdate(BaseModel):
+    items: Optional[list[ItemQuantity]] = []
+    notes: Optional[str] = None
+
 app = FastAPI()
 
 def get_customer_service(id: str):
@@ -102,8 +118,7 @@ def get_item_service(id: str):
     if data is None:
         raise HTTPException(status_code=404, detail=f"Item {id} not found.")
     else:
-        item = ItemCreate(name=data[0], price=data[1])
-        return item
+        return ItemCreate(name=data[0], price=data[1])
     
 def get_item_given_name(item_name: str):
     """Given a name, retrieves an item id and its price from the DB"""
@@ -113,11 +128,7 @@ def get_item_given_name(item_name: str):
     if data is None:
         raise HTTPException(status_code=404, detail=f"Item {item_name} does not exist.")
     else:
-        item_id = data[0]
-        item_price = data[1]
-
-        # print(f"Item id {item_id} has name {item_name} with prince {item_price}.")
-        return Item(id=item_id, name=item_name, price=item_price)
+        return Item(id=data[0], name=item_name, price=data[1])
     
 def format_phone_number(phone_number):
         """Formats the input phone number string to a standard 'xxx-xxx-xxxx' format."""
@@ -163,6 +174,81 @@ def create_customer_service(customer_create: CustomerCreate):
     last_id = cursor.lastrowid
     return Customer(id=last_id, name=name, phone=phone)
 
+def get_order_items(id: int):
+    # Get item list by order_id
+    cursor.execute("SELECT * from item_list where order_id = ?", (id,))
+    item_list_data = cursor.fetchall()
+
+    if item_list_data is None:
+        raise HTTPException(status_code=404, detail=f"Order ID {id} not found in item_list table.")
+    
+    return item_list_data
+
+def get_order_service(id: int):
+    """retrieves a JSON representation of an order in the DB"""
+    # Get order by id
+    cursor.execute("SELECT * from orders where id = ?", (id,))
+    order_data = cursor.fetchone()
+
+    if order_data is None:
+        raise HTTPException(status_code=404, detail=f"Order ID {id} not found.")
+    else: 
+        timestamp = order_data[1]
+        customer_id = order_data[2]
+        notes = order_data[3]
+
+    # Get customer by id
+    customer = get_customer_service(customer_id)
+
+    items_map = {}
+    total = 0
+
+    # Get item list by order_id
+    item_list_data = get_order_items(id)
+    for row in item_list_data:
+        item_id = row[1]
+
+        # Get item by id
+        item = get_item_service(item_id)
+        if item_id in items_map:
+            items_quantity_total_price = items_map[item_id]
+            items_quantity_total_price.quantity += 1
+            items_quantity_total_price.item_price_total = item.price * items_quantity_total_price.quantity
+        else:
+            items_map[item_id] = ItemQuantityTotalPrice(name=item.name, itemPrice=item.price, quantity=1, itemPriceTotal=item.price)
+    if len(items_map) > 0:
+        total=sum(item.item_price_total for item in items_map.values())
+    
+    return OrderReturned(id=id, timestamp=timestamp, name=customer.name, phone=customer.phone, notes=notes, items=list(items_map.values()), total=total)
+
+def create_order_items(order_id, items: list[ItemQuantity]):
+    items_list = []
+    total = 0
+    
+    for item_ordered in items:
+        item_name = item_ordered.name
+        item = get_item_given_name(item_name)
+        item_price = item.price
+        item_quantity = item_ordered.quantity
+        item_price_total = item_price * item_quantity
+        total += item_price_total
+
+        # Insert new row/s into item_list table based on the quantity ordered         
+        for _ in range(item_quantity):
+            cursor.execute("INSERT INTO item_list(order_id, item_id) VALUES (?, ?);", (order_id, item.id,))
+            # Commit the transaction
+            connection.commit()
+
+        # Construct ItemQuantityTotalPrice object
+        items_list.append(ItemQuantityTotalPrice(name = item_name, itemPrice = item_price, quantity=item_quantity, itemPriceTotal = item_price_total))
+    return items_list, total
+
+def delete_order_items(id: int):
+    cursor.execute("DELETE FROM item_list WHERE order_id = ?", (id,))
+    connection.commit()
+    if cursor.rowcount == 0:
+        raise HTTPException(status_code=500, detail=f"Failed to delete Order id {id} from item_list table.")
+
 @app.get("/")
 def read_root():
     return {"Hello": "World"}
@@ -175,25 +261,21 @@ async def create_customer(customer_create: CustomerCreate):
 @app.get("/customers/{id}")
 async def get_customer(id: int):
     """Retrieves a JSON representation of a customer in the DB"""
-    customer = get_customer_service(id)
-    if customer is None:
-        raise HTTPException(status_code=404, detail="Customer not found")
-    else:
-        return customer
+    return get_customer_service(id)
     
 @app.delete("/customers/{id}")
 async def delete_customer(id: int):
     """Deletes a customer in the DB"""
     customer = get_customer_service(id)
     if customer is None:
-        raise HTTPException(status_code=404, detail="Customer not found")
+        raise HTTPException(status_code=404, detail=f"Customer ID {id} not found")
 
     cursor.execute("DELETE FROM customers WHERE id = ?", (id,))
     connection.commit()
 
     if cursor.rowcount == 0:
         cursor.close()
-        raise HTTPException(status_code=404, detail="Customer not found")
+        raise HTTPException(status_code=500, detail=f"Failed to delete Customer ID {id}.")
     return f"Successfully deleted customer id {id} with name {customer.name} and phone {customer.phone}."
 
 @app.put("/customers/{id}")
@@ -201,7 +283,7 @@ async def update_customer(id: int, customer_update: CustomerUpdate):
     """Updates a customer in the DB given a JSON representation"""
     customer = get_customer_service(id)
     if customer is None:
-        raise HTTPException(status_code=404, detail="Customer not found")
+        raise HTTPException(status_code=404, detail=f"Customer id {id} not found")
     
     old_name = customer.name
     old_phone = customer.phone
@@ -209,12 +291,12 @@ async def update_customer(id: int, customer_update: CustomerUpdate):
     new_name = customer_update.name
     if (new_name is not None):
         if (not validate_customer_name_length(new_name)):
-            raise HTTPException(status_code=400, detail=f"Customer new name is beyond the maximum allowed length of {MAXIMUM_NAME_LENGTH}.")
+            raise HTTPException(status_code=400, detail=f"Customer new name {new_name} is beyond the maximum allowed length of {MAXIMUM_NAME_LENGTH}.")
     
     new_phone = customer_update.phone
     if (new_phone is not None):
         if (not validate_customer_phone_length(new_phone)):
-            raise HTTPException(status_code=400, detail=f"Customer Phone is not of required length {REQUIRED_PHONE_LENGTH}.")
+            raise HTTPException(status_code=400, detail=f"Customer Phone {new_phone} is not of required length {REQUIRED_PHONE_LENGTH}.")
         new_phone = format_phone_number(new_phone)
 
     if (new_name is not None and new_name != "" and new_phone is None):
@@ -239,7 +321,7 @@ async def update_customer(id: int, customer_update: CustomerUpdate):
     connection.commit()
     if cursor.rowcount == 0:
         cursor.close()
-        raise HTTPException(status_code=404, detail="Customer not found")
+        raise HTTPException(status_code=500, detail=f"Update of Customer ID {id} failed.")
     return result_detail
 
 @app.post("/items")
@@ -249,7 +331,7 @@ async def create_item(item_create: ItemCreate):
     price = format_price(item_create.price)
 
     if (not validate_customer_name_length(name)):
-        raise HTTPException(status_code=400, detail=f"Item name is beyond the maximum allowed length of {MAXIMUM_NAME_LENGTH}.")
+        raise HTTPException(status_code=400, detail=f"Item name {name} is beyond the maximum allowed length of {MAXIMUM_NAME_LENGTH}.")
 
     # Insert a new row
     cursor.execute("INSERT INTO items(name, price) VALUES (?, ?);", (name, price))
@@ -263,39 +345,30 @@ async def create_item(item_create: ItemCreate):
 @app.get("/items/{id}")
 async def get_item(id: int):
     """Retrieves a JSON representation of an item in the DB"""
-    item = get_item_service(id)
-    if item is None:
-        raise HTTPException(status_code=404, detail="Item not found")
-    else:
-        return item
+    return get_item_service(id)
     
 @app.delete("/items/{id}")
 async def delete_item(id: int):
     """Deletes an item in the DB"""
     item = get_item_service(id)
-    if item is None:
-        raise HTTPException(status_code=404, detail="Item not found")
     
     cursor.execute("DELETE FROM items WHERE id = ?", (id,))
     connection.commit()
     if cursor.rowcount == 0:
-        raise HTTPException(status_code=404, detail="Item not found")
+        raise HTTPException(status_code=500, detail=f"Failed to delete Item ID {id}.")
     return f"Successfully deleted item id {id} with name {item.name} and price {item.price}."
 
 @app.put("/items/{id}")
 async def update_item(id: int, item_update: ItemUpdate):
     """Updates an item in the DB given a JSON representation"""
     item = get_item_service(id)
-    if item is None:
-        raise HTTPException(status_code=404, detail="Item not found")
-    
     old_name = item.name
     old_price = item.price
 
     new_name = item_update.name
     if (new_name is not None):
         if (not validate_customer_name_length(new_name)):
-            raise HTTPException(status_code=400, detail=f"Item new name is beyond the maximum allowed length of {MAXIMUM_NAME_LENGTH}.")
+            raise HTTPException(status_code=400, detail=f"Item new name {new_name} is beyond the maximum allowed length of {MAXIMUM_NAME_LENGTH}.")
     
     new_price = item_update.price
     if (new_price is not None):
@@ -322,7 +395,7 @@ async def update_item(id: int, item_update: ItemUpdate):
 
     connection.commit()
     if cursor.rowcount == 0:
-        raise HTTPException(status_code=404, detail="Item not found")
+        raise HTTPException(status_code=500, detail=f"Failed to update Item ID {id}.")
 
     return result_detail
 
@@ -348,89 +421,60 @@ async def create_order(order_create: OrderCreate):
     connection.commit()
     order_id = cursor.lastrowid
 
-    cursor.execute("SELECT * from orders where id = ?", (order_id,))
-    data = cursor.fetchone()
+    order = get_order_service(order_id)
 
-    if data is None:
-        raise HTTPException(status_code=404, detail="Order ID {order_id} not found.")
-    else: 
-        timestamp = data[1]
-
-    items_list = []
-    total = 0
-    
-    # Get item_id and price given name
-    for item_ordered in order_create.items:
-        item_name = item_ordered.name
-        item = get_item_given_name(item_name)
-        item_price = item.price
-        item_quantity = item_ordered.quantity
-        item_price_total = item_price * item_quantity
-        total += item_price_total
-
-        # Insert new row/s into item_list table based on the quantity ordered         
-        for _ in range(item_quantity):
-            cursor.execute("INSERT INTO item_list(order_id, item_id) VALUES (?, ?);", (order_id, item.id,))
-            # Commit the transaction
-            connection.commit()
-
-        # Construct ItemQuantityTotalPrice object
-        items_list.append(ItemQuantityTotalPrice(name = item_name, itemPrice = item_price, quantity=item_quantity, itemPriceTotal = item_price_total))
-    return OrderCreated(id=order_id, timestamp=timestamp, items=items_list, total=total)
+    items_list, total = create_order_items(order_id, order_create.items)
+    return OrderCreated(id=order_id, timestamp=order.timestamp, items=items_list, total=total)
 
 @app.get("/orders/{id}")
 async def get_order(id: int):
-    """retrieves a JSON representation of an order in the DB"""
-    # Get order by id
-    cursor.execute("SELECT * from orders where id = ?", (id,))
-    order_data = cursor.fetchone()
-
-    if order_data is None:
-        raise HTTPException(status_code=404, detail="Order ID {order_id} not found.")
-    else: 
-        timestamp = order_data[1]
-        customer_id = order_data[2]
-        notes = order_data[3]
-
-    # Get customer by id
-    customer = get_customer_service(customer_id)
-
-    # Get item list by order_id
-    cursor.execute("SELECT * from item_list where order_id = ?", (id,))
-    item_list_data = cursor.fetchall()
-
-    items_map = {}
-    total = 0
-
-    if item_list_data is None:
-        raise HTTPException(status_code=404, detail="Order ID {id} not found in item_list table.")
-    else:
-        for row in item_list_data:
-            item_id = row[1]
-
-            # Get item by id
-            item = get_item_service(item_id)
-            if item_id in items_map:
-                items_quantity_total_price = items_map[item_id]
-                items_quantity_total_price.quantity += 1
-                items_quantity_total_price.item_price_total = item.price * items_quantity_total_price.quantity
-            else:
-                items_map[item_id] = ItemQuantityTotalPrice(name=item.name, itemPrice=item.price, quantity=1, itemPriceTotal=item.price)
-        if len(items_map) > 0:
-            total=sum(item.item_price_total for item in items_map.values())
-    return OrderReturned(id=id, timestamp=timestamp, name=customer.name, phone=customer.phone, notes=notes, items=list(items_map.values()), total=total)
-
+    return get_order_service(id)
+  
 @app.delete("/orders/{id}")
 async def delete_order(id: int):
     """Deletes an order in the DB"""    
-    cursor.execute("DELETE FROM item_list WHERE order_id = ?", (id,))
-    connection.commit()
-    if cursor.rowcount == 0:
-        raise HTTPException(status_code=404, detail=f"Order id {id} not found in item_list table.")
-    
+    delete_order_items(id)
+
     cursor.execute("DELETE FROM orders WHERE id = ?", (id,))
     connection.commit()
     if cursor.rowcount == 0:
         raise HTTPException(status_code=404, detail=f"Order id {id} not found.")
     
     return f"Successfully deleted Order ID {id}."
+
+@app.put("/orders/{id}")
+async def update_order(id: int, order_update: OrderUpdate):
+    """Updates an order in the DB given a JSON representation"""
+    current_timestamp = datetime.now()
+
+    # Update notes in the order
+    notes = order_update.notes
+    if notes is not None and notes:
+        cursor.execute("UPDATE orders SET timestamp = ?, notes = ? WHERE id = ?", (current_timestamp, notes, id,))
+        connection.commit()
+
+        if cursor.rowcount == 0:
+            raise HTTPException(status_code=500, detail=f"Failed to update notes for Order ID {id}.")
+
+    # Update items in the order
+    items = order_update.items
+    if items is not None and len(items) > 0:
+        # Check if items are valid
+        for item in items:
+            get_item_given_name(item.name)
+
+        # Get item list by order_id
+        cursor.execute("SELECT * from item_list where order_id = ?", (id,))
+        item_list_data = cursor.fetchall()
+
+        if item_list_data is not None and len(item_list_data)>0:
+            delete_order_items(id)
+
+        create_order_items(id, items)
+        cursor.execute("UPDATE orders SET timestamp = ? WHERE id = ?", (current_timestamp, id,))
+        connection.commit()
+
+        if cursor.rowcount == 0:
+            raise HTTPException(status_code=500, detail=f"Failed to update items in Order ID {id}.")
+
+    return get_order_service(id)
