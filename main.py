@@ -381,16 +381,16 @@ async def update_customer(id: int, customer_update: CustomerUpdate):
 
     if new_name is not None and new_name != "" and new_phone is None:
         cursor.execute("UPDATE customers SET name = ? WHERE id = ?", (new_name, id))
-        result_detail = f"Successfully updated customer id {id} with old name {old_name} to new name {new_name}."
+        result_detail = f"Successfully updated Customer ID {id} with old name {old_name} to new name {new_name}."
     elif new_phone is not None and new_phone != "" and new_name is None:
         cursor.execute("UPDATE customers SET phone = ? WHERE id = ?", (new_phone, id))
-        result_detail = f"Successfully updated customer id {id} with old phone {old_phone} to new phone {new_phone}."
+        result_detail = f"Successfully updated Customer ID {id} with old phone {old_phone} to new phone {new_phone}."
     else:
         cursor.execute(
             "UPDATE customers SET name = ?, phone = ? WHERE id = ?",
             (new_name, new_phone, id),
         )
-        result_detail = f"Successfully updated customer id {id} with old name {old_name} and phone {old_phone} to new name {new_name} and phone {new_phone}."
+        result_detail = f"Successfully updated Customer ID {id} with old name {old_name} and phone {old_phone} to new name {new_name} and phone {new_phone}."
 
     connection.commit()
     if cursor.rowcount == 0:
@@ -536,7 +536,7 @@ async def delete_order(id: int):
     cursor.execute("DELETE FROM orders WHERE id = ?", (id,))
     connection.commit()
     if cursor.rowcount == 0:
-        raise HTTPException(status_code=404, detail=f"Order id {id} not found.")
+        raise HTTPException(status_code=404, detail=f"Order ID {id} not found.")
 
     return f"Successfully deleted Order ID {id}."
 
