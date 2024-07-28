@@ -1,5 +1,9 @@
 # IS601-finals-ibm
-ibm@njit.edu's Final Project for IS601
+Final Project for IS601
+
+## Contact the Author
+Ivy Blossom B. Manalang
+ibm@njit.edu
 
 # What's here
 This repo contains a REST API backend for a dosa restaurant. This uses a SQLite database and FastAPI to provide access to three objects: 
