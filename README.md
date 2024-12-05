@@ -2,7 +2,7 @@
 Final Project for IS601
 
 # Contact the Author
-Ivy Blossom B. Manalang
+Ivy B. Manalang
 ibm@njit.edu
 
 # What's here
